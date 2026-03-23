@@ -1,9 +1,9 @@
-const fetch = require('node-fetch');
+const axios = require('axios');
 
-export default async function handler(req, res) {
-    // 🔱 1. CORS Setup (ताकि आपकी वेबसाइट इसे कॉल कर सके)
+module.exports = async (req, res) => {
+    // CORS Headers
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*'); 
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
@@ -12,46 +12,44 @@ export default async function handler(req, res) {
         return;
     }
 
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Only POST requests allowed' });
-    }
-
-    // 🔱 2. आपकी गुप्त चाबियाँ (Vercel से आएंगी)
-    const CLIENT_ID = process.env.PROKERALA_CLIENT_ID;
-    const CLIENT_SECRET = process.env.PROKERALA_CLIENT_SECRET;
+    const { datetime, coordinates } = req.body;
 
     try {
-        // 🔱 3. Prokerala से Access Token लेना
-        const tokenResponse = await fetch("https://api.prokerala.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: `grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`
+        // 1. Get Access Token
+        const tokenResponse = await axios.post('https://api.prokerala.com/token', {
+            grant_type: 'client_credentials',
+            client_id: process.env.PROKERALA_CLIENT_ID,
+            client_secret: process.env.PROKERALA_CLIENT_SECRET
         });
 
-        const tokenData = await tokenResponse.json();
-        const access_token = tokenData.access_token;
+        const accessToken = tokenResponse.data.access_token;
 
-        // 🔱 4. Frontend से यूज़र का डेटा लेना
-        const { datetime, coordinates } = req.body;
-
-        // 🔱 5. Prokerala से असली कुण्डली मंगाना (GET Request)
-        const kundliUrl = `https://api.prokerala.com/v2/astrology/kundli?ayanamsa=1&coordinates=${coordinates}&datetime=${datetime}`;
+        // 2. Prepare Requests (D1, D9, Chandra & Planets)
+        const commonParams = `datetime=${datetime}&coordinates=${coordinates}`;
         
-        const kundliResponse = await fetch(kundliUrl, {
-            method: "GET",
-            headers: {
-                "Authorization": `Bearer ${access_token}`,
-                "Content-Type": "application/json"
+        const config = { headers: { Authorization: `Bearer ${accessToken}` } };
+
+        // Sabhi data ek sath mangne ke liye (Parallel Requests)
+        const [planets, lagnaChart, navamshaChart, chandraChart] = await Promise.all([
+            axios.get(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`, config),
+            axios.get(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=birth&chart_style=north-indian`, config),
+            axios.get(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsha&chart_style=north-indian`, config),
+            axios.get(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`, config)
+        ]);
+
+        // 3. Sabhi data ko ek JSON me lapet kar bhejna
+        res.status(200).json({
+            success: true,
+            planets: planets.data.data,
+            charts: {
+                lagna: lagnaChart.data.data.svg,
+                navamsha: navamshaChart.data.data.svg,
+                chandra: chandraChart.data.data.svg
             }
         });
 
-        const kundliData = await kundliResponse.json();
-
-        // 🔱 6. कुण्डली का डेटा आपकी वेबसाइट पर भेजना
-        res.status(200).json(kundliData);
-
     } catch (error) {
-        console.error("Mahadev API Error:", error);
-        res.status(500).json({ error: "Server Error, failed to fetch Kundli" });
+        console.error("API Error:", error.response ? error.response.data : error.message);
+        res.status(500).json({ success: false, error: error.response ? error.response.data : "Internal Server Error" });
     }
-}
+};
