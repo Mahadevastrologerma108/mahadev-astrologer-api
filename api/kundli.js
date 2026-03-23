@@ -23,39 +23,42 @@ export default async function handler(req, res) {
         const accessToken = tokenData.access_token;
         if (!accessToken) throw new Error("Access Token Not Found");
 
-        // 🔱 Correct Params: Adding ayanamsa=1 (Lahiri) and coordinates
         const commonParams = `datetime=${datetime}&coordinates=${coordinates}&ayanamsa=1&la=hi`;
-        const headers = { Authorization: `Bearer ${accessToken}` };
+        const headers = { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json' // Prokerala को सख्त निर्देश कि JSON ही भेजे
+        };
 
-        // 1. Planets Info
-        const planetsRes = await fetch(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`, { headers });
-        const planets = await planetsRes.json();
-
-        // 2. Lagna (Rasi) Chart - Using "rasi" instead of "birth"
-        const lagnaRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=rasi&chart_style=north-indian`, { headers });
-        const lagna = await lagnaRes.json();
-
-        // 3. Navamsha Chart - Using "navamsa"
-        const navamshaRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`, { headers });
-        const navamsha = await navamshaRes.json();
-
-        // 4. Chandra Chart - Using "moon"
-        const chandraRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`, { headers });
-        const chandra = await chandraRes.json();
-
-        // Check if data exists in all responses
-        if (!planets.data || !lagna.data || !navamsha.data || !chandra.data) {
-            const err = lagna.errors || planets.errors || "Data mismatch";
-            throw new Error(JSON.stringify(err));
+        // 🛑 THE BULLETPROOF FETCHER: यह सीधा SVG और JSON दोनों को संभाल लेगा
+        async function smartFetch(url) {
+            const response = await fetch(url, { headers });
+            const text = await response.text();
+            try {
+                return JSON.parse(text); // पहले JSON में बदलने की कोशिश
+            } catch (e) {
+                if (text.trim().startsWith('<svg')) {
+                    return { data: { svg: text } }; // अगर सीधा SVG है, तो खुद पैक कर लो!
+                }
+                throw new Error("Prokerala Sent Unknown Data: " + text.substring(0, 30));
+            }
         }
 
+        // 1. Planets Info
+        const planets = await smartFetch(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`);
+        
+        // 2. Charts (Rasi, Navamsa, Moon)
+        const lagna = await smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=rasi&chart_style=north-indian`);
+        const navamsha = await smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`);
+        const chandra = await smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`);
+
+        // Send Final Data to Website
         res.status(200).json({
             success: true,
-            planets: planets.data,
+            planets: planets.data || [],
             charts: {
-                lagna: lagna.data.svg,
-                navamsha: navamsha.data.svg,
-                chandra: chandra.data.svg
+                lagna: lagna.data ? lagna.data.svg : "<p>Chart Error</p>",
+                navamsha: navamsha.data ? navamsha.data.svg : "<p>Chart Error</p>",
+                chandra: chandra.data ? chandra.data.svg : "<p>Chart Error</p>"
             }
         });
 
