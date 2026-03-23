@@ -1,6 +1,4 @@
-const axios = require('axios');
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
     // CORS Headers
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,41 +13,52 @@ module.exports = async (req, res) => {
     const { datetime, coordinates } = req.body;
 
     try {
-        // 1. Get Access Token
-        const tokenResponse = await axios.post('https://api.prokerala.com/token', {
-            grant_type: 'client_credentials',
-            client_id: process.env.PROKERALA_CLIENT_ID,
-            client_secret: process.env.PROKERALA_CLIENT_SECRET
+        // 1. Get Access Token (Using Built-in Fetch)
+        const tokenResponse = await fetch('https://api.prokerala.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'client_credentials',
+                client_id: process.env.PROKERALA_CLIENT_ID,
+                client_secret: process.env.PROKERALA_CLIENT_SECRET
+            })
         });
 
-        const accessToken = tokenResponse.data.access_token;
+        const tokenData = await tokenResponse.json();
+        const accessToken = tokenData.access_token;
 
-        // 2. Prepare Requests (D1, D9, Chandra & Planets)
+        if (!accessToken) throw new Error("Failed to get Access Token");
+
+        // 2. Prepare Requests
         const commonParams = `datetime=${datetime}&coordinates=${coordinates}`;
-        
-        const config = { headers: { Authorization: `Bearer ${accessToken}` } };
+        const headers = { Authorization: `Bearer ${accessToken}` };
 
-        // Sabhi data ek sath mangne ke liye (Parallel Requests)
-        const [planets, lagnaChart, navamshaChart, chandraChart] = await Promise.all([
-            axios.get(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`, config),
-            axios.get(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=birth&chart_style=north-indian`, config),
-            axios.get(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsha&chart_style=north-indian`, config),
-            axios.get(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`, config)
+        // Sabhi data ek sath mangna (Parallel Fetch)
+        const [planetsRes, lagnaRes, navamshaRes, chandraRes] = await Promise.all([
+            fetch(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`, { headers }),
+            fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=birth&chart_style=north-indian`, { headers }),
+            fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsha&chart_style=north-indian`, { headers }),
+            fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`, { headers })
         ]);
 
-        // 3. Sabhi data ko ek JSON me lapet kar bhejna
+        const planets = await planetsRes.json();
+        const lagna = await lagnaRes.json();
+        const navamsha = await navamshaRes.json();
+        const chandra = await chandraRes.json();
+
+        // 3. Send Success Response
         res.status(200).json({
             success: true,
-            planets: planets.data.data,
+            planets: planets.data,
             charts: {
-                lagna: lagnaChart.data.data.svg,
-                navamsha: navamshaChart.data.data.svg,
-                chandra: chandraChart.data.data.svg
+                lagna: lagna.data.svg,
+                navamsha: navamsha.data.svg,
+                chandra: chandra.data.svg
             }
         });
 
     } catch (error) {
-        console.error("API Error:", error.response ? error.response.data : error.message);
-        res.status(500).json({ success: false, error: error.response ? error.response.data : "Internal Server Error" });
+        console.error("API Error:", error.message);
+        res.status(500).json({ success: false, error: error.message });
     }
-};
+}
