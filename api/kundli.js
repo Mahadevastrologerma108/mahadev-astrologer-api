@@ -23,25 +23,30 @@ export default async function handler(req, res) {
         const accessToken = tokenData.access_token;
         if (!accessToken) throw new Error("Access Token Not Found");
 
-        const commonParams = `datetime=${datetime}&coordinates=${coordinates}`;
+        // 🔱 Correct Params: Adding ayanamsa=1 (Lahiri) and coordinates
+        const commonParams = `datetime=${datetime}&coordinates=${coordinates}&ayanamsa=1&la=hi`;
         const headers = { Authorization: `Bearer ${accessToken}` };
 
-        // 🔱 Ek-ek karke request mangna (Safer for Sandbox Mode)
+        // 1. Planets Info
         const planetsRes = await fetch(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`, { headers });
         const planets = await planetsRes.json();
 
-        const lagnaRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=birth&chart_style=north-indian`, { headers });
+        // 2. Lagna (Rasi) Chart - Using "rasi" instead of "birth"
+        const lagnaRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=rasi&chart_style=north-indian`, { headers });
         const lagna = await lagnaRes.json();
 
-        const navamshaRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsha&chart_style=north-indian`, { headers });
+        // 3. Navamsha Chart - Using "navamsa"
+        const navamshaRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`, { headers });
         const navamsha = await navamshaRes.json();
 
+        // 4. Chandra Chart - Using "moon"
         const chandraRes = await fetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`, { headers });
         const chandra = await chandraRes.json();
 
-        // 🛑 Error Check: Agar data missing ho
+        // Check if data exists in all responses
         if (!planets.data || !lagna.data || !navamsha.data || !chandra.data) {
-            throw new Error(JSON.stringify(lagna.errors || "Data structure mismatch from Prokerala"));
+            const err = lagna.errors || planets.errors || "Data mismatch";
+            throw new Error(JSON.stringify(err));
         }
 
         res.status(200).json({
