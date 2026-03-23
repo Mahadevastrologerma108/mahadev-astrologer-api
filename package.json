@@ -1,0 +1,8 @@
+{
+  "name": "mahadev-kundli-api",
+  "version": "1.0.0",
+  "description": "Private Backend for Mahadev Astrologer MA",
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
