@@ -1,76 +1,148 @@
-export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+async function generateMahadevKundli() {
+        const dob = document.getElementById('k_dob').value;
+        const time = document.getElementById('k_time').value;
+        const lat = document.getElementById('k_lat').value;
+        const lon = document.getElementById('k_lon').value;
+        const resultSection = document.getElementById('result-section');
+        const submitBtn = document.getElementById('submitBtn');
 
-    if (req.method === 'OPTIONS') { res.status(200).end(); return; }
-
-    const { datetime, coordinates } = req.body;
-
-    try {
-        const tokenResponse = await fetch('https://api.prokerala.com/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-                grant_type: 'client_credentials',
-                client_id: process.env.PROKERALA_CLIENT_ID,
-                client_secret: process.env.PROKERALA_CLIENT_SECRET
-            })
-        });
-
-        const tokenData = await tokenResponse.json();
-        const accessToken = tokenData.access_token;
-        if (!accessToken) throw new Error("Access Token Not Found");
-
-        const commonParams = `datetime=${datetime}&coordinates=${coordinates}&ayanamsa=1&la=hi`;
-        const headers = { 
-            'Authorization': `Bearer ${accessToken}`,
-            'Accept': 'application/json'
-        };
-
-        // 🛑 THE BULLETPROOF FETCHER (No change here)
-        async function smartFetch(url) {
-            const response = await fetch(url, { headers });
-            const text = await response.text();
-            try {
-                return JSON.parse(text); 
-            } catch (e) {
-                if (text.trim().startsWith('<svg')) {
-                    return { data: { svg: text } }; 
-                }
-                throw new Error("Prokerala Sent Unknown Data: " + text.substring(0, 30));
-            }
+        if(!dob || !time || !lat || !lon) {
+            alert("🔱 कृपया सभी आवश्यक जानकारी भरें!");
+            return;
         }
 
-        // 🚀 THE BRAHMASTRA: Fetching EVERYTHING at the exact same time! (2x Faster)
-        const [planets, lagna, navamsha, chandra, chalit, dasamsa, birthDetails, dasha] = await Promise.all([
-            smartFetch(`https://api.prokerala.com/v2/astrology/planets?${commonParams}`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=rasi&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=moon&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=chalit&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=dasamsa&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/birth-details?${commonParams}`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/dasha?${commonParams}`)
-        ]);
+        // 🛑 SMART JUGAAD 1: Daily Limit Check (Max 2 Charts Per Day)
+        const todayDate = new Date().toLocaleDateString();
+        let usage = JSON.parse(localStorage.getItem('kundliUsage')) || { date: todayDate, count: 0 };
+        
+        if (usage.date !== todayDate) {
+            usage = { date: todayDate, count: 0 }; // नया दिन, नई शुरुआत!
+        }
 
-        // Send Mega Data to Website
-        res.status(200).json({
-            success: true,
-            planets: planets.data || [],
-            birthDetails: birthDetails.data || {},
-            dasha: dasha.data || {},
-            charts: {
-                lagna: lagna.data ? lagna.data.svg : "<p>Chart Error</p>",
-                navamsha: navamsha.data ? navamsha.data.svg : "<p>Chart Error</p>",
-                chandra: chandra.data ? chandra.data.svg : "<p>Chart Error</p>",
-                chalit: chalit.data ? chalit.data.svg : "<p>Chart Error</p>",
-                dasamsa: dasamsa.data ? dasamsa.data.svg : "<p>Chart Error</p>"
+        // 🛑 SMART JUGAAD 2: Cache System Check
+        // चेक करो कि क्या ये सेम डिटेल्स पहले से सेव हैं?
+        const cacheKey = `kundli_${dob}_${time}_${lat}_${lon}`;
+        const cachedData = localStorage.getItem(cacheKey);
+
+        if (!cachedData && usage.count >= 2) {
+            // अगर नया चार्ट है और लिमिट पार हो गई है
+            alert("😂 Today's limit exhausted! Come tomorrow and try again or try after 12:00 AM 🕛");
+            return;
+        }
+
+        submitBtn.innerText = "ब्रह्मांडीय गणना हो रही है... ⏳";
+        submitBtn.style.opacity = "0.7";
+        resultSection.style.display = "block";
+        
+        // 🎨 UI Update Function (डेटा छापने का लॉजिक)
+        const renderKundli = (data) => {
+            // 1. 3 Charts Inject
+            document.getElementById('lagna_svg').innerHTML = data.charts.lagna;
+            document.getElementById('navamsha_svg').innerHTML = data.charts.navamsha;
+            document.getElementById('chalit_svg').innerHTML = data.charts.chalit;
+            
+            // 2. Planets Table
+            let tableHTML = "";
+            if (data.planets && Array.isArray(data.planets)) {
+                data.planets.forEach(p => {
+                    let status = "मार्गी"; 
+                    let isRetro = (p.isRetro === "true" || p.isRetro === true);
+                    if(isRetro) status = "वक्री (R) 🔄";
+
+                    tableHTML += `<tr>
+                        <td><b>${p.name || '-'}</b></td>
+                        <td>${p.sign || p.rasi || '-'}</td>
+                        <td>${p.normDegree ? p.normDegree.toFixed(2) : (p.degree ? p.degree.toFixed(2) : '-')}°</td>
+                        <td>${p.nakshatra || '-'}</td>
+                        <td>${p.nakshatra_pad || p.nakshatra_pada || '-'}</td>
+                        <td style="color: ${isRetro ? '#ff4d4d' : '#4caf50'};">${status}</td>
+                    </tr>`;
+                });
             }
-        });
+            document.getElementById('planets_body').innerHTML = tableHTML;
 
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+            // 3. Birth Details
+            let bdHtml = "";
+            if(data.birthDetails) {
+                const bd = data.birthDetails;
+                const extractName = (item) => {
+                    if (Array.isArray(item) && item.length > 0) return item.map(i => i.name).join(", ");
+                    return item?.name || "-";
+                };
+                
+                bdHtml += `<div><b>राशि:</b> ${extractName(bd.chandra_rasi)}</div>`;
+                bdHtml += `<div><b>नक्षत्र:</b> ${extractName(bd.nakshatra)}</div>`;
+                bdHtml += `<div><b>नक्षत्र पद:</b> ${bd.nakshatra_pada || "-"}</div>`;
+                bdHtml += `<div><b>तिथि:</b> ${extractName(bd.tithi)}</div>`;
+                bdHtml += `<div><b>करण:</b> ${extractName(bd.karan)}</div>`;
+                bdHtml += `<div><b>योग:</b> ${extractName(bd.yoga)}</div>`;
+                bdHtml += `<div><b>वर्ण:</b> ${bd.varna || "-"}</div>`;
+                bdHtml += `<div><b>वश्य:</b> ${bd.vashya || "-"}</div>`;
+                bdHtml += `<div><b>योनि:</b> ${bd.yoni || "-"}</div>`;
+                bdHtml += `<div><b>गण:</b> ${bd.gana || "-"}</div>`;
+                bdHtml += `<div><b>नाड़ी:</b> ${bd.nadi || "-"}</div>`;
+                bdHtml += `<div><b>पाया:</b> ${bd.paya || "-"}</div>`;
+            }
+            document.getElementById('basic_panchang_data').innerHTML = bdHtml;
+
+            // 👑 Paywall Removed & Consult Banner Added
+            const paywall = document.querySelector('.paywall-container');
+            if(paywall) {
+                paywall.innerHTML = `
+                    <h3 class="gold-text cinzel" style="margin-bottom: 10px;">🔱 विस्तृत कुण्डली विश्लेषण</h3>
+                    <p style="font-size: 0.95rem; color: #fff; line-height: 1.6;">दशा (महादशा/अंतर्दशा), गोचर फल, कालसर्प दोष, मांगलिक दोष और सटीक उपायों की <b>संपूर्ण जानकारी</b> के लिए हमारे विशेषज्ञों से परामर्श लें।</p>
+                    <a href="https://wa.me/YOUR_NUMBER" class="calc-btn" style="text-decoration:none; padding:12px 25px; font-size:1rem; width:auto; display:inline-block; margin-top:15px; background: #25D366; color: #fff; border-radius: 5px;">📱 WhatsApp पर संपर्क करें</a>
+                `;
+            }
+            
+            // Remove blur completely
+            const premiumContent = document.querySelector('.blur-text');
+            if(premiumContent) premiumContent.style.display = 'none';
+            
+            resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            submitBtn.innerText = "कुण्डली बनाएं ➔";
+            submitBtn.style.opacity = "1";
+        };
+
+        // 🚀 THE DECISION: Cache use karein ya API?
+        if (cachedData) {
+            console.log("🔱 Data Loaded From Cache (Credits Saved!)");
+            renderKundli(JSON.parse(cachedData));
+        } else {
+            console.log("🔱 Fetching Fresh Data From Server...");
+            const datetime = `${dob}T${time}:00%2B05:30`;
+            const coordinates = `${lat},${lon}`;
+            const API_URL = "https://mahadev-astrologer-api.vercel.app/api/kundli"; 
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ datetime, coordinates })
+                });
+
+                const rawResponse = await response.text();
+                let data = JSON.parse(rawResponse);
+
+                if(!data.success) {
+                    alert("API Error: " + JSON.stringify(data.error));
+                    submitBtn.innerText = "कुण्डली बनाएं ➔";
+                    submitBtn.style.opacity = "1";
+                    return;
+                }
+
+                // 💾 Save to Cache & Update Daily Limit
+                localStorage.setItem(cacheKey, JSON.stringify(data));
+                usage.count += 1;
+                localStorage.setItem('kundliUsage', JSON.stringify(usage));
+
+                renderKundli(data);
+
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                alert("सर्वर से संपर्क विफल।");
+                submitBtn.innerText = "कुण्डली बनाएं ➔";
+                submitBtn.style.opacity = "1";
+            }
+        }
     }
-}
