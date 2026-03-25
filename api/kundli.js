@@ -5,19 +5,12 @@ module.exports = async function (req, res) {
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ success: false, error: 'Method Not Allowed' });
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method Not Allowed' });
 
     try {
         const { datetime, coordinates } = req.body;
-        if (!datetime || !coordinates) {
-            return res.status(400).json({ success: false, error: 'Missing datetime or coordinates' });
-        }
+        if (!datetime || !coordinates) return res.status(400).json({ success: false, error: 'Missing Data' });
 
         // 1. Prokerala Token
         const tokenResponse = await fetch('https://api.prokerala.com/token', {
@@ -32,50 +25,64 @@ module.exports = async function (req, res) {
 
         const tokenData = await tokenResponse.json();
         const accessToken = tokenData.access_token;
-        
-        if (!accessToken) {
-            throw new Error("Prokerala API Keys Missing or Invalid!");
-        }
+        if (!accessToken) throw new Error("API Keys Missing");
 
         const commonParams = `datetime=${datetime}&coordinates=${coordinates}&ayanamsa=1&la=hi`;
-        const headers = { 
-            'Authorization': `Bearer ${accessToken}`,
-            'Accept': 'application/json'
+        const headers = { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' };
+
+        // 2. Smart Fetch Logic (For both JSON and SVG)
+        async function fetchAPI(endpoint) {
+            try {
+                const r = await fetch(`https://api.prokerala.com/v2/astrology/${endpoint}`, { headers });
+                const text = await r.text();
+                try { return JSON.parse(text); }
+                catch(e) { return { isRawSvg: true, svg: text }; }
+            } catch(e) { return {}; }
+        }
+
+        // 3. 🚀 Fetching ALL required data including Panchang (ताकि योनि/गण/तिथि आ सके)
+        const [planetsRes, lagnaRes, navamshaRes, chalitRes, birthRes, panchangRes] = await Promise.all([
+            fetchAPI(`planet-position?${commonParams}`),
+            fetchAPI(`chart?${commonParams}&chart_type=rasi&chart_style=north-indian`),
+            fetchAPI(`chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`),
+            fetchAPI(`chart?${commonParams}&chart_type=chalit&chart_style=north-indian`),
+            fetchAPI(`birth-details?${commonParams}`),
+            fetchAPI(`advanced-panchang?${commonParams}`)
+        ]);
+
+        // 4. Safely Extracting SVG Charts
+        const getSvg = (res) => {
+            if (!res) return "-";
+            if (res.isRawSvg) return res.svg;
+            if (res.response?.svg) return res.response.svg;
+            if (typeof res.response === 'string') return res.response;
+            return "-";
         };
 
-        // 2. Fetch Logic
-        async function smartFetch(url) {
-            try {
-                const response = await fetch(url, { headers });
-                const text = await response.text();
-                try { 
-                    return JSON.parse(text); 
-                } catch (e) {
-                    if (text.trim().startsWith('<svg')) return { data: { svg: text } }; 
-                    return { data: null };
-                }
-            } catch (err) {
-                return { data: null };
+        // 5. Safely Extracting Planets Array
+        let planetList = [];
+        let pData = planetsRes?.response || planetsRes?.data || planetsRes;
+        if (Array.isArray(pData)) {
+            planetList = pData;
+        } else if (pData) {
+            for (let k in pData) {
+                if (Array.isArray(pData[k])) { planetList = pData[k]; break; }
             }
         }
 
-        // 3. API Calls
-        const [planets, lagna, navamsha, chalit, birthDetails] = await Promise.all([
-            smartFetch(`https://api.prokerala.com/v2/astrology/planet-position?${commonParams}`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=rasi&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=chalit&chart_style=north-indian`),
-            smartFetch(`https://api.prokerala.com/v2/astrology/birth-details?${commonParams}`)
-        ]);
+        // 6. Merging Birth Details and Panchang 
+        let bDetails = birthRes?.response || {};
+        let pDetails = panchangRes?.response || {};
+        let combinedBirthDetails = { ...bDetails, ...pDetails };
 
         return res.status(200).json({
             success: true,
-            planets: planets?.data || [],
-            birthDetails: birthDetails?.data || {},
+            planets: planetList,
+            birthDetails: combinedBirthDetails,
             charts: {
-                lagna: lagna?.data?.svg || "-",
-                navamsha: navamsha?.data?.svg || "-",
-                chalit: chalit?.data?.svg || "-"
+                lagna: getSvg(lagnaRes),
+                navamsha: getSvg(navamshaRes),
+                chalit: getSvg(chalitRes)
             }
         });
 
