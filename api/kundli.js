@@ -1,116 +1,96 @@
-async function generateMahadevKundli() {
-    const dob = document.getElementById('k_dob').value;
-    const time = document.getElementById('k_time').value;
-    const lat = document.getElementById('k_lat').value;
-    const lon = document.getElementById('k_lon').value;
-    const resultSection = document.getElementById('result-section');
-    const submitBtn = document.getElementById('submitBtn');
+module.exports = async function (req, res) {
+    // 🛑 CORS Headers (क्रॉस-ओरिजिन समस्या को रोकने के लिए)
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-    if(!dob || !time || !lat || !lon) {
-        alert("🔱 कृपया सभी आवश्यक जानकारी भरें!");
-        return;
+    // OPTIONS रिक्वेस्ट को तुरंत पास करें
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
     }
 
-    // 🛑 सुधार 1: डेली लिमिट चेक (कैश डेटा के लिए लिमिट नहीं कटेगी)
-    const todayDate = new Date().toLocaleDateString();
-    let usage = JSON.parse(localStorage.getItem('kundliUsage')) || { date: todayDate, count: 0 };
-    if (usage.date !== todayDate) usage = { date: todayDate, count: 0 };
-
-    const cacheKey = `kundli_${dob}_${time}_${lat}_${lon}`;
-    const cachedData = localStorage.getItem(cacheKey);
-
-    // अगर डेटा कैश में नहीं है और 2 की लिमिट खत्म हो गई है
-    if (!cachedData && usage.count >= 2) {
-        alert("😂 Today's limit exhausted! Come tomorrow and try again or try after 12:00 AM 🕛");
-        return;
+    // केवल POST रिक्वेस्ट स्वीकार करें
+    if (req.method !== 'POST') {
+        return res.status(405).json({ success: false, error: 'Method Not Allowed' });
     }
 
-    submitBtn.innerText = "ब्रह्मांडीय गणना हो रही है... ⏳";
-    submitBtn.style.opacity = "0.7";
-    resultSection.style.display = "block";
+    try {
+        console.log("🔱 Request Received at Vercel API..."); // ये Vercel Logs में दिखेगा
 
-    // 🎨 UI Rendering Logic (No Change here, it was perfect)
-    const renderKundli = (data) => {
-        try {
-            document.getElementById('lagna_svg').innerHTML = data.charts.lagna || "Error";
-            document.getElementById('navamsha_svg').innerHTML = data.charts.navamsha || "Error";
-            document.getElementById('chalit_svg').innerHTML = data.charts.chalit || "Error";
-
-            let tableHTML = "";
-            if (data.planets) {
-                data.planets.forEach(p => {
-                    let isRetro = (p.isRetro === "true" || p.isRetro === true);
-                    tableHTML += `<tr>
-                        <td><b>${p.name}</b></td>
-                        <td>${p.sign || p.rasi}</td>
-                        <td>${(p.normDegree || p.degree).toFixed(2)}°</td>
-                        <td>${p.nakshatra}</td>
-                        <td>${p.nakshatra_pad || p.nakshatra_pada || '-'}</td>
-                        <td style="color: ${isRetro ? '#ff4d4d' : '#4caf50'};">${isRetro ? 'वक्री' : 'मार्गी'}</td>
-                    </tr>`;
-                });
-            }
-            document.getElementById('planets_body').innerHTML = tableHTML;
-
-            // Avakhada Chakra Data
-            if(data.birthDetails) {
-                const bd = data.birthDetails;
-                const getName = (item) => (Array.isArray(item) ? item[0]?.name : item?.name) || "-";
-                let bdHtml = `<div><b>नक्षत्र:</b> ${getName(bd.nakshatra)}</div>
-                              <div><b>राशि:</b> ${getName(bd.chandra_rasi)}</div>
-                              <div><b>योनि:</b> ${bd.yoni || "-"}</div>
-                              <div><b>गण:</b> ${bd.gana || "-"}</div>
-                              <div><b>नाड़ी:</b> ${bd.nadi || "-"}</div>
-                              <div><b>वर्ण:</b> ${bd.varna || "-"}</div>`;
-                document.getElementById('basic_panchang_data').innerHTML = bdHtml;
-            }
-
-            // WhatsApp Banner Logic
-            const paywall = document.querySelector('.paywall-container');
-            if(paywall) {
-                paywall.innerHTML = `<h3 class="gold-text cinzel">🔱 विस्तृत कुण्डली विश्लेषण</h3>
-                    <p>दशा, गोचर फल और सटीक उपायों के लिए संपर्क करें।</p>
-                    <a href="https://wa.me/message/VCK5OVBDCN7YK1" target="_blank" class="calc-btn" style="background:#25D366; color:#fff; text-decoration:none; display:inline-block; width:auto; padding:10px 20px;">📱 WhatsApp संपर्क</a>`;
-            }
-
-            submitBtn.innerText = "कुण्डली बनाएं ➔";
-            submitBtn.style.opacity = "1";
-            resultSection.scrollIntoView({ behavior: 'smooth' });
-        } catch(e) { console.error("Rendering Error:", e); }
-    };
-
-    // 🚀 THE DECISION: Cache use karein ya API?
-    if (cachedData) {
-        console.log("🔱 Data Loaded From Cache");
-        renderKundli(JSON.parse(cachedData));
-    } else {
-        const API_URL = "https://mahadev-astrologer-api.vercel.app/api/kundli"; 
-        try {
-            const response = await fetch(API_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ datetime: `${dob}T${time}:00%2B05:30`, coordinates: `${lat},${lon}` })
-            });
-
-            if (!response.ok) throw new Error("Server Response Not OK");
-
-            const rawResponse = await response.text();
-            let data = JSON.parse(rawResponse);
-
-            if(!data.success) throw new Error(data.error || "API Error");
-
-            // 💾 सुधार: डेटा आने पर ही लिमिट बढ़ाएं
-            localStorage.setItem(cacheKey, JSON.stringify(data));
-            usage.count += 1;
-            localStorage.setItem('kundliUsage', JSON.stringify(usage));
-
-            renderKundli(data);
-
-        } catch (error) {
-            console.error("Fetch Error:", error);
-            alert("🔱 सर्वर से संपर्क विफल। \nसंभावित कारण: " + error.message);
-            submitBtn.innerText = "कुण्डली बनाएं ➔";
-            submitBtn.style.opacity = "1";
+        const { datetime, coordinates } = req.body;
+        if (!datetime || !coordinates) {
+            return res.status(400).json({ success: false, error: 'Missing datetime or coordinates' });
         }
+
+        // 1. Prokerala से Token लेना
+        const tokenResponse = await fetch('https://api.prokerala.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'client_credentials',
+                client_id: process.env.PROKERALA_CLIENT_ID,
+                client_secret: process.env.PROKERALA_CLIENT_SECRET
+            })
+        });
+
+        const tokenData = await tokenResponse.json();
+        const accessToken = tokenData.access_token;
+        
+        if (!accessToken) {
+            console.error("Token Error:", tokenData);
+            throw new Error("Prokerala API Keys Missing or Invalid!");
+        }
+
+        const commonParams = `datetime=${datetime}&coordinates=${coordinates}&ayanamsa=1&la=hi`;
+        const headers = { 
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+        };
+
+        // 2. Data Fetching Logic (Try-Catch के साथ)
+        async function smartFetch(url) {
+            try {
+                const response = await fetch(url, { headers });
+                const text = await response.text();
+                try { 
+                    return JSON.parse(text); 
+                } catch (e) {
+                    if (text.trim().startsWith('<svg')) return { data: { svg: text } }; 
+                    return { data: null };
+                }
+            } catch (err) {
+                console.error(`Error fetching ${url}:`, err);
+                return { data: null };
+            }
+        }
+
+        console.log("🔱 Fetching 5 Charts/Data...");
+
+        // 🚀 5 Calls (ताकि 429 Limit Error न आए)
+        const [planets, lagna, navamsha, chalit, birthDetails] = await Promise.all([
+            smartFetch(`https://api.prokerala.com/v2/astrology/planet-position?${commonParams}`),
+            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=rasi&chart_style=north-indian`),
+            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`),
+            smartFetch(`https://api.prokerala.com/v2/astrology/chart?${commonParams}&chart_type=chalit&chart_style=north-indian`),
+            smartFetch(`https://api.prokerala.com/v2/astrology/birth-details?${commonParams}`)
+        ]);
+
+        console.log("🔱 Data successfully fetched. Sending to Frontend...");
+
+        return res.status(200).json({
+            success: true,
+            planets: planets?.data || [],
+            birthDetails: birthDetails?.data || {},
+            charts: {
+                lagna: lagna?.data?.svg || "-",
+                navamsha: navamsha?.data?.svg || "-",
+                chalit: chalit?.data?.svg || "-"
+            }
+        });
+
+    } catch (error) {
+        console.error("🔥 Vercel Internal Error:", error);
+        return res.status(500).json({ success: false, error: error.message });
     }
-}
+};
