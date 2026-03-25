@@ -30,7 +30,7 @@ module.exports = async function (req, res) {
         const commonParams = `datetime=${datetime}&coordinates=${coordinates}&ayanamsa=1&la=hi`;
         const headers = { 'Authorization': `Bearer ${accessToken}`, 'Accept': 'application/json' };
 
-        // 2. Smart Fetch Logic (For both JSON and SVG)
+        // 2. Fetch Logic
         async function fetchAPI(endpoint) {
             try {
                 const r = await fetch(`https://api.prokerala.com/v2/astrology/${endpoint}`, { headers });
@@ -40,17 +40,15 @@ module.exports = async function (req, res) {
             } catch(e) { return {}; }
         }
 
-        // 3. 🚀 Fetching ALL required data including Panchang (ताकि योनि/गण/तिथि आ सके)
-        const [planetsRes, lagnaRes, navamshaRes, chalitRes, birthRes, panchangRes] = await Promise.all([
+        // 3. 🚀 Fetching ONLY what is supported in Free Trial
+        const [planetsRes, lagnaRes, navamshaRes, chalitRes, birthRes] = await Promise.all([
             fetchAPI(`planet-position?${commonParams}`),
             fetchAPI(`chart?${commonParams}&chart_type=rasi&chart_style=north-indian`),
             fetchAPI(`chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`),
             fetchAPI(`chart?${commonParams}&chart_type=chalit&chart_style=north-indian`),
-            fetchAPI(`birth-details?${commonParams}`),
-            fetchAPI(`advanced-panchang?${commonParams}`)
+            fetchAPI(`birth-details?${commonParams}`)
         ]);
 
-        // 4. Safely Extracting SVG Charts
         const getSvg = (res) => {
             if (!res) return "-";
             if (res.isRawSvg) return res.svg;
@@ -59,26 +57,16 @@ module.exports = async function (req, res) {
             return "-";
         };
 
-        // 5. Safely Extracting Planets Array
-        let planetList = [];
-        let pData = planetsRes?.response || planetsRes?.data || planetsRes;
-        if (Array.isArray(pData)) {
-            planetList = pData;
-        } else if (pData) {
-            for (let k in pData) {
-                if (Array.isArray(pData[k])) { planetList = pData[k]; break; }
-            }
-        }
+        // 4. Safely Extracting Planets
+        let pData = planetsRes?.response?.planet_position || planetsRes?.response || planetsRes?.data || [];
 
-        // 6. Merging Birth Details and Panchang 
-        let bDetails = birthRes?.response || {};
-        let pDetails = panchangRes?.response || {};
-        let combinedBirthDetails = { ...bDetails, ...pDetails };
+        // 5. Safely Extracting Birth Details
+        let bDetails = birthRes?.response || birthRes?.data || {};
 
         return res.status(200).json({
             success: true,
-            planets: planetList,
-            birthDetails: combinedBirthDetails,
+            planets: pData,
+            birthDetails: bDetails,
             charts: {
                 lagna: getSvg(lagnaRes),
                 navamsha: getSvg(navamshaRes),
