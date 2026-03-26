@@ -40,12 +40,10 @@ module.exports = async function (req, res) {
             } catch(e) { return {}; }
         }
 
-        // 3. 🚀 Fetching ONLY what is supported in Free Trial
-        const [planetsRes, lagnaRes, navamshaRes, chalitRes, birthRes] = await Promise.all([
+        // 3. 🚀 Credit Saver Mode: Fetching ONLY essential data (Lagna, Planets, Birth Details)
+        const [planetsRes, lagnaRes, birthRes] = await Promise.all([
             fetchAPI(`planet-position?${commonParams}`),
             fetchAPI(`chart?${commonParams}&chart_type=rasi&chart_style=north-indian`),
-            fetchAPI(`chart?${commonParams}&chart_type=navamsa&chart_style=north-indian`),
-            fetchAPI(`chart?${commonParams}&chart_type=chalit&chart_style=north-indian`),
             fetchAPI(`birth-details?${commonParams}`)
         ]);
 
@@ -69,8 +67,8 @@ module.exports = async function (req, res) {
             birthDetails: bDetails,
             charts: {
                 lagna: getSvg(lagnaRes),
-                navamsha: getSvg(navamshaRes),
-                chalit: getSvg(chalitRes)
+                navamsha: "-", // 🛑 Stopped to save API credits
+                chalit: "-"    // 🛑 Stopped to save API credits
             }
         });
 
